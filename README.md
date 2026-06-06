@@ -46,31 +46,21 @@ pip install pycryptodome
 
 If you already have the repository locally, start at step 2 above (create/activate venv and install dependencies).
 
+**Plan of Attack:**
+
+| Action                                  | Short Workflow                                                                                         |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| **1. ZWC Scanner (Passive)**            | Input stego text → Scan for invisible characters → Count ZWC → Detect hidden message                   |
+| **2. Statistical Analysis (Passive)**   | Extract ZWC characters → Calculate frequency → Analyze pattern → Identify encoding type                |
+| **3. Raw Bit Extraction (Passive)**     | Read ZWC symbols → Convert to bits (0/1) → Group into bytes → Recover hidden text                      |
+| **4. Known-Key Decoder (Passive)**      | Input passkey → Verify HMAC → Decrypt payload → Reveal secret message                                  |
+| **5. Strip Attack (Active)**            | Read stego text → Remove all ZWC characters → Save clean text → Hidden message destroyed               |
+| **6. Noise Injection Attack (Active)**  | Read stego text → Insert random ZWC characters → Corrupt bit sequence → Extraction fails               |
+| **7. Substitution Attack (Active)**     | Replace original ZWC symbols with different ZWC → Change bit values → Message becomes unreadable       |
+| **8. HMAC Brute-Force (Active)**        | Load wordlist → Try passkeys one by one → Check HMAC → Find correct key if weak                        |
+| **9. Permutation Brute-Force (Active)** | Test passkey candidates → Reverse symbol permutation → Attempt decoding → Recover message if key found |
+
 **Run the tools (examples)**
-
-- Baseline embed:
-
-```bash
-python3 original_zwc_stego.py embed --cover cover.txt --secret "Hello world" --output stego.txt
-```
-
-- Baseline extract:
-
-```bash
-python3 original_zwc_stego.py extract --stego stego.txt
-```
-
-- Enhanced embed (encryption + permutation):
-
-```bash
-python3 enhanced_zwc_stego.py embed --cover cover.txt --secret "Secret msg" --passkey "MyKey123!" --output stego_enhanced.txt
-```
-
-- Enhanced extract:
-
-```bash
-python3 enhanced_zwc_stego.py extract --stego stego_enhanced.txt --passkey "MyKey123!"
-```
 
 - Attack toolkit (examples):
 
@@ -95,25 +85,13 @@ python3 zwc_attack_toolkit.py brute --file stego_enhanced.txt --wordlist wordlis
 
 This repository includes a Streamlit-based UI (`streamlit_app.py`) that provides a friendly interface for scanning, analyzing, and attacking ZWC stego text.
 
-1. Install (inside the activated virtual environment):
-
-```bash
-# Minimal requirements
-pip install streamlit
-
-# Optional (recommended for nicer charts and AES support)
-pip install plotly pycryptodome
-```
-
-2. Run the web app:
+1. Run the web app:
 
 ```bash
 streamlit run streamlit_app.py
 ```
 
-3. Open the URL printed by Streamlit (usually http://localhost:8501) in your browser.
-
-If `plotly` is not installed the app will still run and fall back to Streamlit's simple charts.
+2. Open the URL printed by Streamlit (usually http://localhost:8501) in your browser.
 
 **Quick tips**
 
@@ -127,13 +105,3 @@ If `plotly` is not installed the app will still run and fall back to Streamlit's
 - Encoding: all scripts read/write UTF-8. If you see garbled output, ensure files are UTF-8 encoded.
 - Permissions: ensure you have write permission for output paths.
 - Short cover text: both embed tools will warn if the cover text is too short to contain the full payload — use a longer `--cover` file.
-
-**Developer tips**
-
-- Run a single example and inspect the output files in a text editor that can show invisible characters (or use the attack toolkit `scan` command).
-- To reproduce results in CI, use the same Python version and install `requirements.txt` into the environment.
-
-If you want, I can:
-
-- Add a small example script that runs a complete embed→extract roundtrip, or
-- Add a `Makefile` or `invoke` tasks for common flows.
