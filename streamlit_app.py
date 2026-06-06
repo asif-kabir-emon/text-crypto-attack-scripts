@@ -7,14 +7,14 @@ from contextlib import redirect_stdout
 import pandas as pd
 import streamlit as st
 try:
-    import plotly.express as px
+    import plotly.express as px # pyright: ignore[reportMissingImports]
     PLOTLY_AVAILABLE = True
 except Exception:
     px = None
     PLOTLY_AVAILABLE = False
 
 # Import functions from your separate toolkit file
-from zwc_attack_toolkit_old import (
+from zwc_attack_toolkit_old import ( # type: ignore
     ZWC_CHARS,
     ZWC_MAP,
     attack_scan,

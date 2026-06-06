@@ -3,6 +3,7 @@
 This repository contains baseline and enhanced Zero-Width Character (ZWC) text steganography tools and an attack toolkit.
 
 **Prerequisites:**
+
 - Python 3.8+ (3.10 recommended)
 - Git (if cloning from remote)
 
@@ -90,6 +91,36 @@ python3 zwc_attack_toolkit.py noise --file stego.txt --output noisy.txt --densit
 python3 zwc_attack_toolkit.py brute --file stego_enhanced.txt --wordlist wordlist.txt
 ```
 
+**Streamlit Web UI**
+
+This repository includes a Streamlit-based UI (`streamlit_app.py`) that provides a friendly interface for scanning, analyzing, and attacking ZWC stego text.
+
+1. Install (inside the activated virtual environment):
+
+```bash
+# Minimal requirements
+pip install streamlit
+
+# Optional (recommended for nicer charts and AES support)
+pip install plotly pycryptodome
+```
+
+2. Run the web app:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+3. Open the URL printed by Streamlit (usually http://localhost:8501) in your browser.
+
+If `plotly` is not installed the app will still run and fall back to Streamlit's simple charts.
+
+**Quick tips**
+
+- Upload a `stego.txt` file or paste text into the sidebar to begin.
+- Use the centered "Run" button to execute the selected action.
+- For brute-force runs, uploading a `wordlist.txt` is recommended to avoid using the built-in test list.
+
 **Notes & Troubleshooting**
 
 - AES support: the enhanced tool uses PyCryptodome when available. If it's not installed the code falls back to a weaker XOR method and prints a warning. Install `pycryptodome` for full AES-256-CBC support.
@@ -103,5 +134,6 @@ python3 zwc_attack_toolkit.py brute --file stego_enhanced.txt --wordlist wordlis
 - To reproduce results in CI, use the same Python version and install `requirements.txt` into the environment.
 
 If you want, I can:
+
 - Add a small example script that runs a complete embed→extract roundtrip, or
 - Add a `Makefile` or `invoke` tasks for common flows.
