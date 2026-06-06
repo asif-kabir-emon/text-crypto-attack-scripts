@@ -444,23 +444,26 @@ elif action_key == "Decode with Known Passkey":
     decode_left, decode_right = st.columns([1.6, 1])
     with decode_left:
         passkey = st.text_input("Passkey", type="password")
-        decode_clicked = st.button("Decode now")
+        st.caption("Enter the passkey, then use the main Run button above.")
     with decode_right:
         decode_total_chars, decode_visible_chars, decode_zwc_total, _ = zwc_summary(text)
         st.metric("Total characters", decode_total_chars)
         st.metric("Visible characters", decode_visible_chars)
         st.metric("ZWC characters", decode_zwc_total)
 
-    if decode_clicked:
+    if run_pressed:
         if not passkey:
             st.error("Please enter a passkey.")
         else:
-            result = decode_enhanced_with_key(text, passkey)
-            with st.container():
-                if result.startswith("[FAIL]") or result.startswith("[ERROR]"):
-                    st.error(result)
-                else:
-                    st.success("Message decoded successfully.")
+            with st.spinner("Decoding enhanced payload with known passkey..."):
+                result = decode_enhanced_with_key(text, passkey)
+
+            if result.startswith("[FAIL]") or result.startswith("[ERROR]"):
+                st.error(result)
+                st.info("If this is an enhanced stego file, check that the passkey exactly matches the one used during embedding and that the text has not been stripped, substituted, or corrupted.")
+            else:
+                st.success("Message decoded successfully.")
+                with st.expander("Decoded message", expanded=True):
                     st.code(result, language="text")
 
 elif action_key == "Strip Attack":
