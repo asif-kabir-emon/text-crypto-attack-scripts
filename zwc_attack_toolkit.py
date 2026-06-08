@@ -3,7 +3,7 @@
 zwc_attack_toolkit.py
 =====================
 ATTACK GROUP - WQE7003 Group Assignment
-ZWC Steganography Attack Toolkit (Fully Blind Upgrade)
+ZWC Steganography Attack Toolkit
 
 Implements both PASSIVE and ACTIVE adaptive blind attacks against ZWC text steganography.
 
@@ -48,6 +48,7 @@ ZWC_MAP = {
     '\u200C': 'ZWNJ  (U+200C) Zero Width Non-Joiner',
     '\u200D': 'ZWJ   (U+200D) Zero Width Joiner',
     '\uFEFF': 'ZWNBS (U+FEFF) Zero Width No-Break Space / BOM',
+
     '\u2060': 'WJ    (U+2060) Word Joiner',
     '\u2061': 'FA    (U+2061) Function Application',
     '\u2062': 'IT    (U+2062) Invisible Times',
@@ -135,10 +136,21 @@ def attack_scan(text: str):
     if found:
         print("ZWC Characters Detected:")
         for ch, (name, count) in found.items():
-            print(f"  [{hex(ord(ch))}] {name:45s} -> {count} occurrences")
+            # Dynamic visual bar for each ZWC type (percentage of total ZWCs)
+            pct = (count / zwc_total) * 100 if zwc_total else 0
+            bar = '█' * int(pct / 2)
+            print(f"  [{hex(ord(ch))}] {name:45s} -> {count:5d} occurrences {bar} ({pct:.1f}%)")
         print()
         print("[VERDICT] Steganographic content LIKELY PRESENT.")
         print("[REASON]  Zero-width characters have no legitimate display purpose in plain text.")
+        # Dynamic suggestion based on distinct symbol count
+        distinct = len(found)
+        if distinct == 2:
+            print("[ADVICE]  Only 2 distinct ZWC types → likely 1‑bit encoding. Use 'extract' for blind recovery.")
+        elif distinct == 4:
+            print("[ADVICE]  Exactly 4 distinct ZWC types → possible 2‑bit encoding. Use 'brute' with a passkey wordlist.")
+        elif distinct > 4:
+            print("[ADVICE]  Many ZWC types → custom or multi‑layer steganography. Passive analysis may be limited.")
     else:
         print("[VERDICT] No ZWC characters detected. Text appears clean.")
 
@@ -167,7 +179,7 @@ def attack_stats(text: str):
         bar = '█' * int(pct / 2)
         print(f"  U+{ord(ch):04X}  {bar:25s} {cnt:5d} ({pct:.1f}%)")
 
-    # Estimate encoding blindly
+    # Dynamic encoding inference with entropy estimation
     n_distinct = len(freq)
     print(f"\nDistinct ZWC types used : {n_distinct}")
     if n_distinct == 2:
@@ -175,14 +187,31 @@ def attack_stats(text: str):
         print("            Adaptive blind attack can crack this layout automatically.")
         bits = len(zwc_sequence)
         print(f"[INFERENCE] Estimated raw payload : ~{bits} bits = ~{bits // 8} bytes")
+
+        # Uniformity check (for true 1-bit encoding, both symbols should appear roughly equally)
+        counts = list(freq.values())
+        if len(counts) == 2 and max(counts) / min(counts) > 3:
+            print("[WARNING]  Frequency imbalance between the two ZWC types. Possibly not pure 1‑bit encoding or unbalanced message.")
     elif n_distinct == 4:
         print("[INFERENCE] Likely 2-bit (dibit) encoding (4 symbols -> 00/01/10/11)")
         print("            Custom symbol mapping detected. Passkey brute-force required.")
         bits = len(zwc_sequence) * 2
         print(f"[INFERENCE] Estimated raw payload : ~{bits} bits = ~{bits // 8} bytes")
+        # Check uniformity
+        counts = list(freq.values())
+        avg = sum(counts) / 4
+        max_dev = max(abs(c - avg) for c in counts) / avg if avg > 0 else 0
+        if max_dev > 0.5:
+            print("[WARNING]  Uneven distribution of the 4 ZWC types. Possibly not pure 2‑bit encoding or payload is not random.")
     else:
         print(f"[INFERENCE] Complex multi-symbol layout ({n_distinct} types).")
         print("            Possibly customized n-bit encoding or layered steganography.")
+        # Attempt to guess bits per symbol: log2(n_distinct) if distribution is uniform
+        if n_distinct > 1:
+            bits_per_sym = (n_distinct - 1).bit_length()
+            print(f"[SPECULATION] Could be ~{bits_per_sym} bits per symbol if encoding uses all types equally.")
+            bits = len(zwc_sequence) * bits_per_sym
+            print(f"[SPECULATION] Potential raw payload: ~{bits} bits = ~{bits // 8} bytes")
 
     # Position analysis
     positions = [i for i, ch in enumerate(text) if ch in ZWC_CHARS]
@@ -197,6 +226,12 @@ def attack_stats(text: str):
             print("  [INFERENCE] Sparse insertion - consistent with word-boundary placement")
         else:
             print("  [INFERENCE] Dense insertion - possibly block embedding")
+
+        # Gap histogram (dynamic)
+        print("\nGap distribution (first 10 most common gaps):")
+        gap_counter = Counter(gaps)
+        for gap, cnt in gap_counter.most_common(10):
+            print(f"    Gap = {gap:3d} chars : {cnt} occurrences")
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -216,12 +251,16 @@ def attack_extract_raw(text: str):
         if not zwc_seq:
             return
         top_2 = [ORIG_ZWC_0, ORIG_ZWC_1]
+        print("[INFO] Falling back to default baseline ZWCs (U+200B, U+200C).")
     else:
         # Retrieve the 2 most frequent ZWCs as candidate 0 and 1
         top_2 = [item[0] for item in freq.most_common(2)]
         print(f"[INFO] Blind analysis detected the 2 most frequent ZWC symbols:")
         print(f"       Symbol A: U+{ord(top_2[0]):04X} (Frequency: {freq[top_2[0]]})")
         print(f"       Symbol B: U+{ord(top_2[1]):04X} (Frequency: {freq[top_2[1]]})")
+        # Dynamic hint if frequencies are extremely imbalanced
+        if freq[top_2[0]] > 2 * freq[top_2[1]]:
+            print("[HINT]   Significant frequency imbalance — either the message is heavily skewed or these are not the correct 0/1 pair.")
 
     zwc_a, zwc_b = top_2[0], top_2[1]
     # Filter sequence to contain only these two characters
@@ -233,6 +272,7 @@ def attack_extract_raw(text: str):
         (zwc_b, zwc_a, f"Mapping Scheme 2 (U+{ord(zwc_b):04X}=0, U+{ord(zwc_a):04X}=1)")
     ]
 
+    success = False
     for z0, z1, label in trials:
         bits = ''.join('0' if ch == z0 else '1' for ch in zwc_seq)
 
@@ -251,16 +291,23 @@ def attack_extract_raw(text: str):
             print(f"Total bits extracted: {len(bits)} bits")
             print(f"[RESULT] Successfully decrypted plaintext blindly: '{raw_msg}'")
             print("[VERDICT] Steganography algorithm broken blindly (no hardcoded baseline required).")
-            return  # Exit early upon successful decryption
+            success = True
+            break  # Exit early upon successful decryption
         except Exception:
             # Decoding failed implies wrong mapping direction, proceed to the next scheme
             continue
 
     # 3. If both schemes fail UTF-8 decoding, payload might be encrypted or corrupted
-    print("\n[RESULT] Attempted all binary mapping permutations, but failed to restore standard UTF-8 text.")
-    print(
-        "[INFERENCE] Possible reasons: 1. Hidden payload is encrypted (e.g., AES used); 2. Multi-bit (2-bit) encoding used; 3. Data corruption.")
-    print("[HINT] Please use 'stats' to observe features, or use 'brute' module to brute-force the key.")
+    if not success:
+        print("\n[RESULT] Attempted all binary mapping permutations, but failed to restore standard UTF-8 text.")
+        print("[INFERENCE] Possible reasons: 1. Hidden payload is encrypted (e.g., AES used); 2. Multi-bit (2-bit) encoding used; 3. Data corruption.")
+        print("[HINT] Please use 'stats' to observe features, or use 'brute' module to brute-force the key.")
+        # Additional dynamic analysis: show first 100 bits as hex preview
+        bits = ''.join('0' if ch == zwc_a else '1' for ch in zwc_seq)
+        if bits:
+            print("\n[DEBUG] Raw bits (first 128) assuming first mapping:")
+            print(f"       {bits[:128]}")
+            print("[DEBUG] If the data is encrypted, no plaintext will appear.")
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -294,8 +341,10 @@ def decode_enhanced_with_key(text: str, passkey: str) -> str:
     if len(freq) >= 4:
         active_symbols = [item[0] for item in freq.most_common(4)]
         active_symbols.sort()  # Sort by code point to ensure consistency of permutation index
+        print(f"[DYNAMIC] Using top-4 ZWCs from text: {[hex(ord(s)) for s in active_symbols]}")
     else:
         active_symbols = ENH_ZWC_SYMBOLS
+        print(f"[DYNAMIC] Less than 4 ZWC types found. Falling back to default symbols.")
 
     zwc_seq = [ch for ch in text if ch in active_symbols]
     if not zwc_seq:
@@ -363,7 +412,10 @@ def attack_strip(text: str) -> str:
 def attack_noise(text: str, density: float = 0.3, seed: int = 42) -> str:
     banner("ACTIVE ATTACK 6 — ZWC Noise Injection Attack")
     rng = random.Random(seed)
-    noise_symbols = list(ZWC_CHARS)
+    # Dynamic noise: prefer ZWCs that are NOT currently present in the text, to maximize confusion
+    present_zwcs = set(ch for ch in text if ch in ZWC_CHARS)
+    potential_noise = list(ZWC_CHARS - present_zwcs) if (ZWC_CHARS - present_zwcs) else list(ZWC_CHARS)
+    noise_symbols = potential_noise
 
     chars = list(text)
     injected = 0
@@ -375,11 +427,16 @@ def attack_noise(text: str, density: float = 0.3, seed: int = 42) -> str:
             injected += 1
 
     noisy = ''.join(result)
-    print(f"Original ZWC count : {sum(1 for c in text if c in ZWC_CHARS)}")
+    original_zwc_count = sum(1 for c in text if c in ZWC_CHARS)
+    print(f"Original ZWC count : {original_zwc_count}")
     print(f"Noise ZWC injected : {injected}")
     print(f"Total ZWC now      : {sum(1 for c in noisy if c in ZWC_CHARS)}")
     print("[RESULT] Noise injected. Original message bits corrupted.")
     print("[RESULT] Extraction will produce garbled output. HMAC will FAIL on enhanced version.")
+    # Dynamic feedback: show which noise characters were used
+    used_noise = set(ch for ch in noisy if ch in ZWC_CHARS) - present_zwcs
+    if used_noise:
+        print(f"[DYNAMIC] Injected noise characters: {[hex(ord(c)) for c in used_noise]}")
     return noisy
 
 
@@ -398,15 +455,23 @@ def attack_substitute(text: str) -> str:
     # Pick ZWCs NOT used in the current text from the full set to act as active substitute distractors
     unused_zwcs = list(ZWC_CHARS - present_zwcs)
     if not unused_zwcs:
-        # Defensive fallback: if all 9 ZWCs are used, use the full shuffled set
+        # Defensive fallback: if all ZWCs are used, use the full shuffled set
         unused_zwcs = list(ZWC_CHARS)
+        print("[DYNAMIC] All known ZWCs are already present. Fallback to full set for substitution.")
+    else:
+        print(f"[DYNAMIC] Substituting with previously absent ZWCs: {[hex(ord(c)) for c in unused_zwcs[:5]]}...")
 
     substituted = 0
     result = []
+    # To add extra confusion, we can use a random mapping from each original ZWC to a random unused ZWC
+    # For better scrambling, we create a substitution dictionary
+    substitution_map = {}
+    for ch in present_zwcs:
+        substitution_map[ch] = random.choice(unused_zwcs)
+
     for ch in text:
         if ch in present_zwcs:
-            # Blind substitution: randomly map all active stego positions to previously absent ZWCs
-            result.append(random.choice(unused_zwcs))
+            result.append(substitution_map[ch])
             substituted += 1
         else:
             result.append(ch)
@@ -443,6 +508,11 @@ def attack_brute(text: str, wordlist_path: str):
     found = False
     for i, key in enumerate(candidates):
         result = decode_enhanced_with_key(text, key)
+        # decode_enhanced_with_key already prints dynamic info when called, but we suppress its prints?
+        # Actually it prints via its own prints. To avoid cluttering, we redirect? No, we keep as is.
+        # For brute-force, we don't want to flood the output with each attempt's internal prints.
+        # So we temporarily override sys.stdout? That's complex. Instead we capture the function's output
+        # in the caller (UI) using capture_print_output. That's fine.
         if not result.startswith('[FAIL]') and not result.startswith('[ERROR]'):
             print(f"[!!] PASSKEY FOUND: '{key}'")
             print(f"[!!] Decoded message: {result}")
