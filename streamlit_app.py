@@ -173,6 +173,120 @@ def zwc_position_stats(text):
     return positions, gaps, avg_gap
 
 
+def zwc_sequence_table(text, limit=500):
+    rows = []
+    for sequence_no, (position, ch) in enumerate(
+        ((idx, ch) for idx, ch in enumerate(text) if ch in ZWC_CHARS),
+        start=1,
+    ):
+        rows.append(
+            {
+                "Seq": sequence_no,
+                "Position": position,
+                "Unicode": f"U+{ord(ch):04X}",
+                "Name": ZWC_MAP.get(ch, "Unknown ZWC"),
+                "Python Escape": ch.encode("unicode_escape").decode("ascii"),
+            }
+        )
+
+    return pd.DataFrame(rows[:limit])
+
+
+def analyze_zwc_sequence_pattern(text):
+    zwc_positions = [idx for idx, ch in enumerate(text) if ch in ZWC_CHARS]
+    if len(zwc_positions) < 3:
+        return {
+            "verdict": "Not enough data",
+            "confidence": 0.0,
+            "details": "At least 3 ZWC characters are needed to estimate sequence behavior.",
+            "anchor_coverage": 0.0,
+            "avg_anchor_skip": 0.0,
+            "gap_cv": 0.0,
+        }
+
+    visible_chars = []
+    original_to_visible = {}
+    visible_index = 0
+    for original_index, ch in enumerate(text):
+        if ch in ZWC_CHARS:
+            continue
+        original_to_visible[original_index] = visible_index
+        visible_chars.append(ch)
+        visible_index += 1
+
+    visible_text = "".join(visible_chars)
+    word_boundaries = [
+        idx
+        for idx in range(len(visible_text) - 1)
+        if not visible_text[idx].isspace() and visible_text[idx + 1].isspace()
+    ]
+    boundary_rank = {visible_idx: rank for rank, visible_idx in enumerate(word_boundaries)}
+
+    anchor_ranks = []
+    last_visible_index = -1
+    for original_index, ch in enumerate(text):
+        if ch in ZWC_CHARS:
+            if last_visible_index in boundary_rank:
+                anchor_ranks.append(boundary_rank[last_visible_index])
+        else:
+            last_visible_index = original_to_visible[original_index]
+
+    anchor_gaps = [anchor_ranks[i + 1] - anchor_ranks[i] for i in range(len(anchor_ranks) - 1)]
+    consecutive_steps = sum(1 for gap in anchor_gaps if gap == 1)
+    anchor_coverage = consecutive_steps / len(anchor_gaps) if anchor_gaps else 0.0
+    avg_anchor_skip = sum(anchor_gaps) / len(anchor_gaps) if anchor_gaps else 0.0
+
+    position_gaps = [zwc_positions[i + 1] - zwc_positions[i] for i in range(len(zwc_positions) - 1)]
+    avg_gap = sum(position_gaps) / len(position_gaps)
+    gap_variance = sum((gap - avg_gap) ** 2 for gap in position_gaps) / len(position_gaps)
+    gap_cv = (gap_variance ** 0.5) / avg_gap if avg_gap else 0.0
+
+    if anchor_coverage >= 0.75 and avg_anchor_skip <= 1.4:
+        verdict = "Sequential-like"
+        confidence = min(0.99, 0.55 + (anchor_coverage * 0.35) + max(0, 0.10 - gap_cv * 0.05))
+        details = "Most ZWCs appear on consecutive word-boundary positions in the uploaded file."
+    elif anchor_coverage <= 0.35 or avg_anchor_skip >= 2.0:
+        verdict = "Random-like"
+        confidence = min(0.99, 0.55 + ((1 - anchor_coverage) * 0.30) + min(avg_anchor_skip / 10, 0.14))
+        details = "ZWCs skip many possible word-boundary positions, which looks like scattered/random placement."
+    else:
+        verdict = "Mixed / inconclusive"
+        confidence = 0.50
+        details = "The uploaded file has both consecutive and skipped ZWC placements."
+
+    return {
+        "verdict": verdict,
+        "confidence": confidence,
+        "details": details,
+        "anchor_coverage": anchor_coverage,
+        "avg_anchor_skip": avg_anchor_skip,
+        "gap_cv": gap_cv,
+    }
+
+
+def render_zwc_sequence_view(text, source_label="uploaded file"):
+    pattern = analyze_zwc_sequence_pattern(text)
+    st.markdown("#### Calculated ZWC Sequence Pattern")
+    verdict_col, confidence_col, coverage_col = st.columns(3)
+    verdict_col.metric("Pattern", pattern["verdict"])
+    confidence_col.metric("Confidence", f"{pattern['confidence'] * 100:.0f}%")
+    coverage_col.metric("Consecutive coverage", f"{pattern['anchor_coverage'] * 100:.1f}%")
+    st.caption(
+        f"Source: {source_label} | {pattern['details']} "
+        f"Average anchor skip: {pattern['avg_anchor_skip']:.2f}; gap variation: {pattern['gap_cv']:.2f}."
+    )
+
+    sequence_df = zwc_sequence_table(text)
+    if sequence_df.empty:
+        st.info("No known zero-width characters detected in the text.")
+        return
+
+    st.markdown("#### ZWC Sequence")
+    st.caption(f"Source: {source_label} | Showing first {len(sequence_df)} ZWC characters in file order.")
+    st.dataframe(sequence_df, use_container_width=True, height=260)
+    st.code(" ".join(sequence_df["Unicode"].tolist()), language="text")
+
+
 def render_brute_status(output):
     if "Passkey NOT found" in output:
         st.warning("Passkey NOT found in wordlist (25 attempts).")
@@ -215,7 +329,6 @@ st.caption("Scan zero-width data, study embedding behavior, and explore attack o
 with st.sidebar:
     st.subheader("Input & Options")
     uploaded_file = st.file_uploader("Upload stego text file", type=["txt", "text", "csv", "md"])
-    manual_text = st.text_area("Or paste text here", height=180, placeholder="Paste stego text here...")
     st.divider()
 
     # Beautified actions list with emoji and short hints
@@ -254,11 +367,15 @@ with st.sidebar:
     with st.expander("Advanced options", expanded=False):
         st.write("Noise density, brute-force wordlist, and other action-specific settings are available in the main panel when you run the action.")
 
-file_text = read_uploaded_text(uploaded_file)
-text = manual_text if manual_text.strip() else file_text
+if uploaded_file is not None:
+    text = read_uploaded_text(uploaded_file)
+    input_source_label = f"uploaded file: {uploaded_file.name}"
+else:
+    text = ""
+    input_source_label = "no input"
 
 if not text:
-    st.info("Upload a text file or paste text in the sidebar to begin.")
+    st.info("Upload a text file in the sidebar to begin.")
     st.stop()
 
 # col1, col2, col3, col4 = st.columns([1.5, 1, 1, 1])
@@ -343,6 +460,8 @@ if action_key == "Scan":
                 st.markdown("#### Detected Types")
                 st.dataframe(scanner_freq_df, use_container_width=True, height=220)
 
+            render_zwc_sequence_view(text, input_source_label)
+
         with st.expander("Raw detection report", expanded=True):
             output, _ = capture_print_output(attack_scan, text)
             st.code(output, language="text")
@@ -401,6 +520,8 @@ elif action_key == "Statistics":
                     )
                     gap_fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), showlegend=False, xaxis_title="Gap size", yaxis_title="Frequency")
                     st.plotly_chart(gap_fig, use_container_width=True)
+
+                render_zwc_sequence_view(text, input_source_label)
 
             with st.expander("Raw statistics report", expanded=True):
                 output, _ = capture_print_output(attack_stats, text)
@@ -702,6 +823,8 @@ elif action_key == "Full Passive Scan":
                     st.plotly_chart(full_gap_fig, use_container_width=True)
                 else:
                     st.bar_chart(pd.Series(gaps).value_counts().sort_index())
+
+            render_zwc_sequence_view(text, input_source_label)
 
         with st.expander("Full passive scan report", expanded=True):
             st.markdown("##### Scanner")
